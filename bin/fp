@@ -23,7 +23,13 @@ when 'serve'
   end
   op.parse!(ARGV)
   plan_path = ARGV.shift or die(op.to_s)
-  Floorplan::Server::App.new(plan_path, **options).start
+  begin
+    Floorplan::Server::App.new(plan_path, **options).start
+  rescue Interrupt
+    # Graceful exit on Ctrl+C
+    puts "\nStopping..."
+    exit 130
+  end
 when 'build'
   options = { out: 'out.svg', theme: :default }
   op = OptionParser.new do |o|
@@ -66,4 +72,3 @@ else
   USAGE
   exit 1
 end
-

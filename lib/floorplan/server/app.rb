@@ -24,11 +24,13 @@ module Floorplan
         @theme = theme
         @clients = []
         @mutex = Mutex.new
+        @stopping = false
       end
 
       def start
         server = WEBrick::HTTPServer.new(BindAddress: @host, Port: @port, AccessLog: [], Logger: WEBrick::Log.new($stderr, WEBrick::Log::WARN))
-        trap('INT') { server.shutdown }
+        trap('INT') { @stopping = true; server.shutdown }
+        trap('TERM') { @stopping = true; server.shutdown }
 
         server.mount_proc('/') { |req, res| serve_index(req, res) }
         server.mount_proc('/plan.svg') { |req, res| serve_svg(req, res) }
@@ -40,9 +42,19 @@ module Floorplan
           @watcher = Thread.new { watch_loop(server) }
         end
         puts "Serving #{@plan_path} on http://#{@host}:#{@port} (live reload: #{@live ? 'on' : 'off'})"
-        server.start
-      ensure
-        @watcher&.kill
+        begin
+          server.start
+        rescue Interrupt
+          @stopping = true
+        ensure
+          @stopping = true
+          @watcher&.kill
+          begin
+            @mutex.synchronize { @clients.each { |c| write_sse(c, 'shutdown') } }
+          rescue StandardError
+          end
+          server.shutdown rescue nil
+        end
       end
 
       private
@@ -116,9 +128,11 @@ module Floorplan
         res.body = ''
         # Keep open until server shutdown or client disconnect
         begin
-          loop do
-            sleep 60
-            write_sse(res, 'ping')
+          ticks = 0
+          until @stopping
+            sleep 1
+            ticks += 1
+            write_sse(res, 'ping') if (ticks % 30).zero?
           end
         rescue StandardError
           # client disconnected
@@ -136,6 +150,7 @@ module Floorplan
       def watch_loop(server)
         last_mtime = File.mtime(@plan_path) rescue Time.at(0)
         loop do
+          break if @stopping
           sleep 0.3
           m = File.mtime(@plan_path) rescue last_mtime
           next if m <= last_mtime
@@ -148,4 +163,3 @@ module Floorplan
     end
   end
 end
-
