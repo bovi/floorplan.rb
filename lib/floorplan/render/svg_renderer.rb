@@ -8,7 +8,6 @@ module Floorplan
       end
 
       def render(plan)
-        # Determine bounds from wall endpoints
         points = plan.walls.flat_map { |w| [w.p1, w.p2] }
         points = [Vec2.new(0,0), Vec2.new(1000,1000)] if points.empty?
         min_x = points.map(&:x).min
@@ -19,26 +18,47 @@ module Floorplan
         width = (max_x - min_x) + pad * 2
         height = (max_y - min_y) + pad * 2
 
-        # SVG coordinates: y down; plan uses y up. Flip y.
         yflip = ->(y) { (max_y - (y - min_y)) + pad }
         xmap = ->(x) { (x - min_x) + pad }
 
-        wall_paths = plan.walls.map do |w|
-          x1 = xmap.call(w.p1.x)
-          y1 = yflip.call(w.p1.y)
-          x2 = xmap.call(w.p2.x)
-          y2 = yflip.call(w.p2.y)
-          thickness = [w.thickness, 1.0].max
-          %(<line x1="#{x1}" y1="#{y1}" x2="#{x2}" y2="#{y2}" stroke="#222" stroke-width="#{thickness/10.0}" stroke-linecap="square" />)
-        end.join("\n        ")
+        wall_polys = plan.walls.map { |w| extrude_wall_poly(w) }
+        wall_paths = wall_polys.map do |poly|
+          d = points_to_path(poly, xmap, yflip)
+          %(<path d="#{d}" />)
+        end.join("\n            ")
+
+        opening_rects = plan.openings.map do |o|
+          wall = plan.walls.find { |w| w.id == o.wall_id }
+          next nil unless wall
+          rect = opening_rect_on_wall(wall, o)
+          { rect: rect, type: o.type }
+        end.compact
+
+        openings_svg = opening_rects.map do |h|
+          rect = h[:rect]
+          path = points_to_path(rect, xmap, yflip)
+          %(<path d="#{path}" fill="#fff" stroke="none" />)
+        end.join("\n            ")
+
+        window_strokes = opening_rects.select { |h| h[:type] == :window }.map do |h|
+          r = h[:rect]
+          mid1 = midpoint(r[0], r[3])
+          mid2 = midpoint(r[1], r[2])
+          x1, y1 = xmap.call(mid1.x), yflip.call(mid1.y)
+          x2, y2 = xmap.call(mid2.x), yflip.call(mid2.y)
+          %(<line x1="#{x1}" y1="#{y1}" x2="#{x2}" y2="#{y2}" stroke="#1e88e5" stroke-width="2" />)
+        end.join("\n            ")
 
         <<~SVG
         <?xml version="1.0" encoding="UTF-8"?>
         <svg xmlns="http://www.w3.org/2000/svg" width="#{width/10.0}mm" height="#{height/10.0}mm" viewBox="0 0 #{width} #{height}" style="background:#fff">
-          <g id="walls">
+          <g id="walls" fill="#222" stroke="none">
             #{wall_paths}
           </g>
-          <!-- TODO: render openings, rooms, labels -->
+          <g id="openings">
+            #{openings_svg}
+            #{window_strokes}
+          </g>
         </svg>
         SVG
       rescue Exception => e
@@ -56,7 +76,80 @@ module Floorplan
         </svg>
         SVG
       end
+
+      def points_to_path(poly, xmap, yflip)
+        return '' if poly.nil? || poly.empty?
+        d = []
+        poly.each_with_index do |p, i|
+          x = xmap.call(p.x)
+          y = yflip.call(p.y)
+          d << (i.zero? ? "M #{x} #{y}" : "L #{x} #{y}")
+        end
+        d << 'Z'
+        d.join(' ')
+      end
+
+      def extrude_wall_poly(w)
+        dx = w.p2.x - w.p1.x
+        dy = w.p2.y - w.p1.y
+        len = Math.hypot(dx, dy)
+        raise 'Wall length zero' if len <= 0
+        ux = dx / len
+        uy = dy / len
+        # Left-hand normal
+        nx = -uy
+        ny = ux
+        t = w.thickness.to_f
+        case w.justify
+        when :left
+          a1 = Vec2.new(w.p1.x, w.p1.y)
+          b1 = Vec2.new(w.p2.x, w.p2.y)
+          a2 = Vec2.new(w.p1.x + nx * t, w.p1.y + ny * t)
+          b2 = Vec2.new(w.p2.x + nx * t, w.p2.y + ny * t)
+        when :right
+          a1 = Vec2.new(w.p1.x - nx * t, w.p1.y - ny * t)
+          b1 = Vec2.new(w.p2.x - nx * t, w.p2.y - ny * t)
+          a2 = Vec2.new(w.p1.x, w.p1.y)
+          b2 = Vec2.new(w.p2.x, w.p2.y)
+        else # :center or default
+          half = t / 2.0
+          a1 = Vec2.new(w.p1.x - nx * half, w.p1.y - ny * half)
+          b1 = Vec2.new(w.p2.x - nx * half, w.p2.y - ny * half)
+          a2 = Vec2.new(w.p1.x + nx * half, w.p1.y + ny * half)
+          b2 = Vec2.new(w.p2.x + nx * half, w.p2.y + ny * half)
+        end
+        [a1, b1, b2, a2]
+      end
+
+      def opening_rect_on_wall(w, o)
+        dx = w.p2.x - w.p1.x
+        dy = w.p2.y - w.p1.y
+        len = Math.hypot(dx, dy)
+        ux = dx / len
+        uy = dy / len
+        nx = -uy
+        ny = ux
+        at = o.at.to_f
+        width = o.width.to_f
+        t = w.thickness.to_f
+        case w.justify
+        when :left
+          lo = 0.0; hi = t
+        when :right
+          lo = -t; hi = 0.0
+        else
+          lo = -t / 2.0; hi = t / 2.0
+        end
+        p_a = Vec2.new(w.p1.x + ux * at + nx * lo, w.p1.y + uy * at + ny * lo)
+        p_b = Vec2.new(w.p1.x + ux * (at + width) + nx * lo, w.p1.y + uy * (at + width) + ny * lo)
+        p_c = Vec2.new(w.p1.x + ux * (at + width) + nx * hi, w.p1.y + uy * (at + width) + ny * hi)
+        p_d = Vec2.new(w.p1.x + ux * at + nx * hi, w.p1.y + uy * at + ny * hi)
+        [p_a, p_b, p_c, p_d]
+      end
+
+      def midpoint(a, b)
+        Vec2.new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0)
+      end
     end
   end
 end
-

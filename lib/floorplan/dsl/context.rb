@@ -76,7 +76,9 @@ module Floorplan
 
       def close_path(id: nil, thickness: nil, justify: nil, layer: nil)
         raise 'no path to close (call start ... then go ...)' unless @cursor && @path_start
-        add_wall(@cursor, @path_start, id: id, thickness: thickness, justify: justify, layer: layer)
+        if distance(@cursor, @path_start) > 1e-6
+          add_wall(@cursor, @path_start, id: id, thickness: thickness, justify: justify, layer: layer)
+        end
         @cursor = @path_start
         @path_start = nil
       end
@@ -124,7 +126,10 @@ module Floorplan
         @plan.ensure_layer(opts[:layer])
         @plan.walls << Floorplan::Wall.new(id: id, p1: p1, p2: p2, thickness: opts[:thickness], justify: opts[:justify], layer: opts[:layer])
       end
+
+      def distance(a, b)
+        Math.hypot(a.x - b.x, a.y - b.y)
+      end
     end
   end
 end
-

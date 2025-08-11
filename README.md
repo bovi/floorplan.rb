@@ -36,6 +36,8 @@ Floorplan.plan do
 end
 ```
 
+See `examples/simple_room.rb` and `examples/l_shape.rb`.
+
 ## Commands
 
 - `fp serve plan.rb [--port 9393] [--host 127.0.0.1] [--no-live]` — view in browser with live reload.
@@ -47,4 +49,4 @@ end
 
 - Internal unit is millimeters. Helpers: `1.m`, `20.cm`, `150.mm`.
 - WEBrick may require `gem install webrick` on Ruby 3+.
-- This is an MVP scaffold; geometry, validation, and rendering will evolve.
+- Rendering draws wall polygons with thickness; openings are cut as gaps (windows show a light blue frame line). This is an MVP and will evolve.
