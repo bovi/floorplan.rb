@@ -74,23 +74,94 @@ module Floorplan
           <meta charset="utf-8" />
           <title>Floorplan Viewer</title>
           <style>
-            html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
-            header { padding: 8px 12px; background: #111; color: #eee; font-size: 14px; }
-            main { height: calc(100% - 40px); display: flex; align-items: center; justify-content: center; background: #f7f7f7; }
-            img { max-width: 100%; max-height: 100%; box-shadow: 0 0 0 1px #ddd inset; background: #fff; }
-            .error { color: #a00; white-space: pre; padding: 8px; }
+            html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+            header { padding: 8px 12px; background: #111; color: #eee; font-size: 14px; display:flex; gap:12px; align-items:center; }
+            header .spacer { flex: 1; }
+            header .btn { cursor: pointer; background:#333; color:#eee; border:1px solid #444; padding:2px 6px; border-radius:3px; font-size:12px; }
+            main { height: calc(100% - 40px); background: #f3f4f6; position: relative; overflow: hidden; }
+            #viewport { position:absolute; inset:0; overflow:hidden; }
+            #stage { transform-origin: 0 0; will-change: transform; }
+            #svg { display:block; background:#fff; box-shadow: 0 0 0 1px #ddd inset; user-select:none; pointer-events:none; }
+            .hud { position:absolute; right:8px; bottom:8px; background:rgba(0,0,0,.5); color:#fff; padding:4px 6px; border-radius:3px; font-size:12px; }
           </style>
           <header>
-            Floorplan.rb — #{@plan_path} — Live reload #{@live ? 'ON' : 'OFF'}
+            <div>Floorplan.rb — #{@plan_path} — Live reload #{@live ? 'ON' : 'OFF'}</div>
+            <div class="spacer"></div>
+            <button class="btn" id="fitBtn" title="Fit to window (1)">Fit</button>
+            <button class="btn" id="resetBtn" title="Reset (0)">Reset</button>
+            <button class="btn" id="zoomInBtn" title="Zoom in (+)">+</button>
+            <button class="btn" id="zoomOutBtn" title="Zoom out (-)">−</button>
           </header>
           <main>
-            <img id="svg" src="/plan.svg?ts=#{Time.now.to_i}" alt="floorplan" />
+            <div id="viewport">
+              <div id="stage">
+                <img id="svg" src="/plan.svg?ts=#{Time.now.to_i}" alt="floorplan" />
+              </div>
+              <div class="hud" id="hud">100%</div>
+            </div>
           </main>
           <script>
           (function(){
             var img = document.getElementById('svg');
+            var viewport = document.getElementById('viewport');
+            var stage = document.getElementById('stage');
+            var hud = document.getElementById('hud');
+            var zoomInBtn = document.getElementById('zoomInBtn');
+            var zoomOutBtn = document.getElementById('zoomOutBtn');
+            var fitBtn = document.getElementById('fitBtn');
+            var resetBtn = document.getElementById('resetBtn');
+
             function reload(){ img.src = '/plan.svg?ts=' + Date.now(); }
             document.addEventListener('keydown', function(e){ if (e.key === 'r') reload(); });
+
+            var scale = 1, tx = 0, ty = 0;
+            var userAdjusted = false;
+            function apply(){ stage.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')'; hud.textContent = Math.round(scale*100) + '%'; }
+
+            function fit(){
+              var vw = viewport.clientWidth, vh = viewport.clientHeight;
+              var iw = img.naturalWidth || img.width; var ih = img.naturalHeight || img.height;
+              if (!iw || !ih) return;
+              scale = Math.min(vw/iw, vh/ih);
+              var w = iw * scale, h = ih * scale;
+              tx = (vw - w)/2; ty = (vh - h)/2;
+              userAdjusted = false; apply();
+            }
+            function reset(){ scale = 1; tx = 0; ty = 0; userAdjusted = false; apply(); }
+            function zoomAt(screenX, screenY, k){
+              var old = scale; var ns = Math.min(20, Math.max(0.1, old * k));
+              var rect = viewport.getBoundingClientRect();
+              var sx = screenX - rect.left; var sy = screenY - rect.top;
+              var kk = ns/old;
+              tx = (1-kk)*sx + kk*tx;
+              ty = (1-kk)*sy + kk*ty;
+              scale = ns; userAdjusted = true; apply();
+            }
+            function zoomStep(dir){ zoomAt(viewport.clientWidth/2, viewport.clientHeight/2, dir>0 ? 1.2 : 1/1.2); }
+
+            // Mouse wheel zoom
+            viewport.addEventListener('wheel', function(e){ e.preventDefault(); var d = e.deltaY>0 ? -1 : 1; var f = d>0 ? 1.1 : 1/1.1; zoomAt(e.clientX, e.clientY, f); }, { passive: false });
+            // Drag to pan
+            var dragging=false, lx=0, ly=0;
+            viewport.addEventListener('mousedown', function(e){ dragging=true; lx=e.clientX; ly=e.clientY; e.preventDefault(); });
+            window.addEventListener('mousemove', function(e){ if(!dragging) return; var dx=e.clientX-lx, dy=e.clientY-ly; lx=e.clientX; ly=e.clientY; tx+=dx; ty+=dy; userAdjusted=true; apply(); });
+            window.addEventListener('mouseup', function(){ dragging=false; });
+            // Buttons
+            zoomInBtn.addEventListener('click', function(){ zoomStep(1); });
+            zoomOutBtn.addEventListener('click', function(){ zoomStep(-1); });
+            fitBtn.addEventListener('click', fit);
+            resetBtn.addEventListener('click', reset);
+            // Keys
+            document.addEventListener('keydown', function(e){
+              if(e.key === '+'){ zoomStep(1); }
+              else if(e.key === '-'){ zoomStep(-1); }
+              else if(e.key === '0'){ reset(); }
+              else if(e.key === '1'){ fit(); }
+            });
+            // Fit on first load and when image changes unless user adjusted
+            img.addEventListener('load', function(){ if (!userAdjusted) fit(); });
+            window.addEventListener('resize', function(){ if (!userAdjusted) fit(); });
+
             var live = #{@live ? 'true' : 'false'};
             var es; var pollHandle; var lastMTime = 0;
             function checkMTime(){

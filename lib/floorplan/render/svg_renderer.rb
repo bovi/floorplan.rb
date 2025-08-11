@@ -8,22 +8,30 @@ module Floorplan
       end
 
       def render(plan)
-        points = plan.walls.flat_map { |w| [w.p1, w.p2] }
+        # Compute extruded wall polygons first so bounds include thickness and ref offsets
+        wall_polys = plan.walls.map { |w| extrude_wall_poly(w) }
+
+        # Collect points for bounds from wall polys and any room polygons
+        points = wall_polys.flatten(1)
+        plan.rooms.each do |r|
+          poly = r.polygon || (r.by_loop && Floorplan::Rooms.polygon_for(plan, r))
+          points.concat(poly) if poly
+        end
         points = [Vec2.new(0,0), Vec2.new(1000,1000)] if points.empty?
+
         min_x = points.map(&:x).min
         min_y = points.map(&:y).min
         max_x = points.map(&:x).max
         max_y = points.map(&:y).max
-        pad = 200.0
+        # Add padding to avoid clipping labels and strokes
+        pad = 300.0
         span_w = (max_x - min_x)
         span_h = (max_y - min_y)
         width = span_w + pad * 2
         height = span_h + pad * 2
 
-        yflip = ->(y) { (max_y - (y - min_y)) + pad }
-        xmap = ->(x) { (x - min_x) + pad }
-
-        wall_polys = plan.walls.map { |w| extrude_wall_poly(w) }
+        xmap = ->(x) { pad + (x - min_x) }
+        yflip = ->(y) { pad + (max_y - y) }
         wall_paths = wall_polys.map do |poly|
           d = points_to_path(poly, xmap, yflip)
           %(<path d="#{d}" />)
