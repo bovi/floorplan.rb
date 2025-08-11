@@ -1,0 +1,69 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'optparse'
+require 'json'
+require_relative '../lib/floorplan'
+
+def die(msg, code = 1)
+  warn msg
+  exit code
+end
+
+cmd = ARGV.shift
+case cmd
+when 'serve'
+  options = { host: '127.0.0.1', port: 9393, live: true, theme: :default }
+  op = OptionParser.new do |o|
+    o.banner = "Usage: fp serve PLAN.rb [options]"
+    o.on('--host HOST', String, 'Bind host (default 127.0.0.1)') { |v| options[:host] = v }
+    o.on('--port PORT', Integer, 'Port (default 9393)') { |v| options[:port] = v }
+    o.on('--[no-]live', 'Enable/disable live reload (default on)') { |v| options[:live] = v }
+    o.on('--theme THEME', String, 'Render theme (default: default)') { |v| options[:theme] = v.to_sym }
+  end
+  op.parse!(ARGV)
+  plan_path = ARGV.shift or die(op.to_s)
+  Floorplan::Server::App.new(plan_path, **options).start
+when 'build'
+  options = { out: 'out.svg', theme: :default }
+  op = OptionParser.new do |o|
+    o.banner = "Usage: fp build PLAN.rb -o out.svg"
+    o.on('-o', '--out FILE', String, 'Output SVG file') { |v| options[:out] = v }
+    o.on('--theme THEME', String, 'Render theme') { |v| options[:theme] = v.to_sym }
+  end
+  op.parse!(ARGV)
+  plan_path = ARGV.shift or die(op.to_s)
+  plan = Floorplan::Evaluator.from_file(plan_path)
+  Floorplan::Validate.check!(plan)
+  svg = Floorplan::Render::SVGRenderer.new(theme: options[:theme]).render(plan)
+  File.write(options[:out], svg)
+  puts "Wrote #{options[:out]}"
+when 'validate'
+  plan_path = ARGV.shift or die('Usage: fp validate PLAN.rb')
+  plan = Floorplan::Evaluator.from_file(plan_path)
+  Floorplan::Validate.check!(plan)
+  puts 'OK'
+when 'inspect'
+  options = { out: 'out.json' }
+  op = OptionParser.new do |o|
+    o.banner = "Usage: fp inspect PLAN.rb -o out.json"
+    o.on('-o', '--out FILE', String, 'Output JSON file') { |v| options[:out] = v }
+  end
+  op.parse!(ARGV)
+  plan_path = ARGV.shift or die(op.to_s)
+  plan = Floorplan::Evaluator.from_file(plan_path)
+  Floorplan::Validate.check!(plan)
+  data = plan.to_h
+  File.write(options[:out], JSON.pretty_generate(data))
+  puts "Wrote #{options[:out]}"
+else
+  warn <<~USAGE
+    Usage: fp <command> [args]
+      serve   PLAN.rb [--port 9393] [--host 127.0.0.1] [--no-live]
+      build   PLAN.rb -o out.svg
+      validate PLAN.rb
+      inspect PLAN.rb -o out.json
+  USAGE
+  exit 1
+end
+
