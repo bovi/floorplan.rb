@@ -15,8 +15,10 @@ module Floorplan
         max_x = points.map(&:x).max
         max_y = points.map(&:y).max
         pad = 200.0
-        width = (max_x - min_x) + pad * 2
-        height = (max_y - min_y) + pad * 2
+        span_w = (max_x - min_x)
+        span_h = (max_y - min_y)
+        width = span_w + pad * 2
+        height = span_h + pad * 2
 
         yflip = ->(y) { (max_y - (y - min_y)) + pad }
         xmap = ->(x) { (x - min_x) + pad }
@@ -49,9 +51,14 @@ module Floorplan
           %(<line x1="#{x1}" y1="#{y1}" x2="#{x2}" y2="#{y2}" stroke="#1e88e5" stroke-width="2" />)
         end.join("\n            ")
 
+        # Dynamic label size based on drawing span (user units ~ mm)
+        base_span = [span_w, span_h].min
+        label_size = [[base_span * 0.02, 36.0].max, 160.0].min
+        rooms_group = render_rooms(plan, xmap, yflip, label_size: label_size)
         <<~SVG
         <?xml version="1.0" encoding="UTF-8"?>
         <svg xmlns="http://www.w3.org/2000/svg" width="#{width/10.0}mm" height="#{height/10.0}mm" viewBox="0 0 #{width} #{height}" style="background:#fff">
+          #{rooms_group}
           <g id="walls" fill="#222" stroke="none">
             #{wall_paths}
           </g>
@@ -149,6 +156,84 @@ module Floorplan
 
       def midpoint(a, b)
         Vec2.new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0)
+      end
+
+      def render_rooms(plan, xmap, yflip, label_size: 24.0)
+        polys = []
+        labels = []
+        plan.rooms.each_with_index do |r, idx|
+          poly = r.polygon || (r.by_loop && Floorplan::Rooms.polygon_for(plan, r))
+          next unless poly && poly.length >= 3
+          d = points_to_path(poly, xmap, yflip)
+          fill = r.fill || default_room_fill(idx)
+          polys << %(<path d="#{d}" fill="#{fill}" stroke="none" opacity="0.6" />)
+          cx, cy = centroid(poly)
+          area_mm2 = polygon_area_mm2(poly).abs
+          area_m2 = area_mm2 / 1_000_000.0
+          area_str = format('%.1f m²', area_m2)
+          tx = xmap.call(cx)
+          ty = yflip.call(cy)
+          if r.label && !r.label.to_s.empty?
+            labels << %(
+              <text x="#{tx}" y="#{ty}" font-family="system-ui, sans-serif" text-anchor="middle" fill="#0d47a1">
+                <tspan x="#{tx}" dy="#{-0.2 * label_size}" font-size="#{label_size}">#{escape_text(r.label)}</tspan>
+                <tspan x="#{tx}" dy="#{1.2 * label_size}" font-size="#{(label_size * 0.85)}">#{escape_text(area_str)}</tspan>
+              </text>
+            )
+          else
+            labels << %(<text x="#{tx}" y="#{ty}" font-family="system-ui, sans-serif" font-size="#{label_size}" fill="#0d47a1" text-anchor="middle" dominant-baseline="middle">#{escape_text(area_str)}</text>)
+          end
+        end
+        return '' if polys.empty? && labels.empty?
+        "<g id=\"rooms\">\n#{(polys + labels).join("\n")}\n</g>"
+      end
+
+      def centroid(poly)
+        # polygon centroid (simple, non-self-intersecting)
+        a = 0.0
+        cx = 0.0
+        cy = 0.0
+        (0...poly.length).each do |i|
+          p0 = poly[i]
+          p1 = poly[(i + 1) % poly.length]
+          cross = p0.x * p1.y - p1.x * p0.y
+          a += cross
+          cx += (p0.x + p1.x) * cross
+          cy += (p0.y + p1.y) * cross
+        end
+        a *= 0.5
+        if a.abs < 1e-9
+          # fallback average
+          sx = poly.sum(&:x)
+          sy = poly.sum(&:y)
+          return [sx / poly.length, sy / poly.length]
+        end
+        [cx / (6.0 * a), cy / (6.0 * a)]
+      end
+
+      def escape_text(t)
+        t.to_s.gsub('&', '&amp;').gsub('<', '&lt;').gsub('>', '&gt;')
+      end
+
+      def default_room_fill(idx)
+        palette = [
+          '#bbdefb', # blue 100
+          '#dcedc8', # green 100
+          '#ffe0b2', # orange 100
+          '#f8bbd0', # pink 100
+          '#c5cae9'  # indigo 100
+        ]
+        palette[idx % palette.length]
+      end
+
+      def polygon_area_mm2(poly)
+        a = 0.0
+        (0...poly.length).each do |i|
+          p0 = poly[i]
+          p1 = poly[(i + 1) % poly.length]
+          a += p0.x * p1.y - p1.x * p0.y
+        end
+        0.5 * a
       end
     end
   end

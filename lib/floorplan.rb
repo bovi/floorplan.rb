@@ -6,6 +6,7 @@ end
 
 require_relative 'floorplan/units'
 require_relative 'floorplan/plan'
+require_relative 'floorplan/rooms'
 require_relative 'floorplan/dsl/context'
 require_relative 'floorplan/evaluator'
 require_relative 'floorplan/validate'
@@ -19,4 +20,3 @@ module Floorplan
     ctx.plan
   end
 end
-

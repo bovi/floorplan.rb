@@ -36,7 +36,7 @@ Floorplan.plan do
 end
 ```
 
-See `examples/simple_room.rb` and `examples/l_shape.rb`.
+See `examples/simple_room.rb`, `examples/l_shape.rb`, and `examples/two_rooms.rb`.
 
 ## Commands
 
@@ -50,3 +50,4 @@ See `examples/simple_room.rb` and `examples/l_shape.rb`.
 - Internal unit is millimeters. Helpers: `1.m`, `20.cm`, `150.mm`.
 - WEBrick may require `gem install webrick` on Ruby 3+.
 - Rendering draws wall polygons with thickness; openings are cut as gaps (windows show a light blue frame line). This is an MVP and will evolve.
+ - Rooms: define via `polygon: [[x,y],...]` or `by_loop: [:w1,:w2,...]`. Rooms render as light fills with optional labels.

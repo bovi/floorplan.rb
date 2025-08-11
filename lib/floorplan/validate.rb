@@ -35,6 +35,23 @@ module Floorplan
           end
         end
       end
+      # Rooms: either polygon present and valid, or by_loop can be resolved
+      plan.rooms.each do |r|
+        poly = r.polygon
+        if poly && poly.length >= 3
+          # ok; optionally ensure not self-closing; assume well-formed for MVP
+        elsif r.by_loop && !r.by_loop.empty?
+          poly = Floorplan::Rooms.polygon_for(plan, r)
+          if poly.nil? || poly.length < 3
+            errors << "Room #{r.id || '(unnamed)'} by_loop does not form a closed polygon"
+          else
+            # cache computed polygon for downstream renderers
+            r.polygon = poly
+          end
+        else
+          errors << "Room #{r.id || '(unnamed)'} must define polygon: [...] or by_loop: [...]"
+        end
+      end
       raise ValidationError, errors.join("\n") unless errors.empty?
       true
     end

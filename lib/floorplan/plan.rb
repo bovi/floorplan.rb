@@ -116,4 +116,3 @@ module Floorplan
     end
   end
 end
-
