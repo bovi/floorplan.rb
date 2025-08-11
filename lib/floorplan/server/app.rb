@@ -28,13 +28,21 @@ module Floorplan
       end
 
       def start
-        server = WEBrick::HTTPServer.new(BindAddress: @host, Port: @port, AccessLog: [], Logger: WEBrick::Log.new($stderr, WEBrick::Log::WARN))
+        server = WEBrick::HTTPServer.new(
+          BindAddress: @host,
+          Port: @port,
+          AccessLog: [],
+          Logger: WEBrick::Log.new($stderr, WEBrick::Log::WARN),
+          DoNotReverseLookup: true,
+          RequestTimeout: 3600
+        )
         trap('INT') { @stopping = true; server.shutdown }
         trap('TERM') { @stopping = true; server.shutdown }
 
         server.mount_proc('/') { |req, res| serve_index(req, res) }
         server.mount_proc('/plan.svg') { |req, res| serve_svg(req, res) }
         server.mount_proc('/plan.json') { |req, res| serve_json(req, res) }
+        server.mount_proc('/mtime') { |_req, res| serve_mtime(res) }
         server.mount_proc('/health') { |_req, res| res.status = 200; res['Content-Type'] = 'text/plain'; res.body = 'ok' }
         server.mount_proc('/events') { |req, res| serve_sse(req, res) }
 
@@ -83,7 +91,23 @@ module Floorplan
             var img = document.getElementById('svg');
             function reload(){ img.src = '/plan.svg?ts=' + Date.now(); }
             document.addEventListener('keydown', function(e){ if (e.key === 'r') reload(); });
-            #{ @live ? "var es = new EventSource('/events'); es.onmessage = function(){ reload(); }; es.onerror = function(){ console.log('SSE disconnected'); };" : ''}
+            var live = #{@live ? 'true' : 'false'};
+            var es; var pollHandle; var lastMTime = 0;
+            function checkMTime(){
+              fetch('/mtime', {cache:'no-store'}).then(function(r){ return r.text(); }).then(function(t){
+                var ts = parseInt(t, 10) || 0;
+                if (ts && ts !== lastMTime) { lastMTime = ts; reload(); }
+              }).catch(function(){});
+            }
+            pollHandle = setInterval(checkMTime, 1000);
+            if (live) {
+              try {
+                es = new EventSource('/events');
+                es.addEventListener('change', function(){ reload(); });
+                es.addEventListener('ping', function(){});
+                es.onerror = function(){ try { es.close(); } catch(_e){} };
+              } catch(e) { /* ignore; polling handles reloads */ }
+            }
           })();
           </script>
         HTML
@@ -120,19 +144,29 @@ module Floorplan
         end
       end
 
+      def serve_mtime(res)
+        res['Content-Type'] = 'text/plain; charset=utf-8'
+        res['Cache-Control'] = 'no-store'
+        ts = (File.mtime(@plan_path).to_i rescue 0)
+        res.body = ts.to_s
+      end
+
       def serve_sse(_req, res)
         res['Content-Type'] = 'text/event-stream'
         res['Cache-Control'] = 'no-cache'
+        res['Connection'] = 'keep-alive'
         res.chunked = true
         @mutex.synchronize { @clients << res }
         res.body = ''
+        # initial handshake
+        write_sse(res, 'ping', event: 'ping')
         # Keep open until server shutdown or client disconnect
         begin
           ticks = 0
           until @stopping
             sleep 1
             ticks += 1
-            write_sse(res, 'ping') if (ticks % 30).zero?
+            write_sse(res, 'ping', event: 'ping') if (ticks % 15).zero?
           end
         rescue StandardError
           # client disconnected
@@ -141,7 +175,8 @@ module Floorplan
         end
       end
 
-      def write_sse(res, data)
+      def write_sse(res, data, event: 'message')
+        res << "event: #{event}\n"
         res << "data: #{data}\n\n"
       rescue StandardError
         # ignore broken pipe; cleanup elsewhere
@@ -156,7 +191,7 @@ module Floorplan
           next if m <= last_mtime
           last_mtime = m
           @mutex.synchronize do
-            @clients.each { |c| write_sse(c, 'change') }
+            @clients.each { |c| write_sse(c, '1', event: 'change') }
           end
         end
       end
