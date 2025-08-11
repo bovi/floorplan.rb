@@ -20,6 +20,9 @@ module Floorplan
         end
         openings.each do |o|
           errors << "Opening #{o.id || '(unnamed)'} width must be > 0" if o.width.to_f <= 0.0
+          unless %i[centerline inner_face outer_face].include?(o.ref)
+            errors << "Opening #{o.id || '(unnamed)'} invalid ref #{o.ref.inspect} (use :centerline, :inner_face, or :outer_face)"
+          end
           if o.at.to_f < 0.0
             errors << "Opening #{o.id || '(unnamed)'} at must be >= 0"
           end

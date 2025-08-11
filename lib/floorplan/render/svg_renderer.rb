@@ -107,23 +107,37 @@ module Floorplan
         nx = -uy
         ny = ux
         t = w.thickness.to_f
-        case w.justify
-        when :left
+        if w.ref == :inner_face
+          outward = (w.interior_side == :left) ? -1.0 : 1.0
           a1 = Vec2.new(w.p1.x, w.p1.y)
           b1 = Vec2.new(w.p2.x, w.p2.y)
-          a2 = Vec2.new(w.p1.x + nx * t, w.p1.y + ny * t)
-          b2 = Vec2.new(w.p2.x + nx * t, w.p2.y + ny * t)
-        when :right
-          a1 = Vec2.new(w.p1.x - nx * t, w.p1.y - ny * t)
-          b1 = Vec2.new(w.p2.x - nx * t, w.p2.y - ny * t)
+          a2 = Vec2.new(w.p1.x + nx * t * outward, w.p1.y + ny * t * outward)
+          b2 = Vec2.new(w.p2.x + nx * t * outward, w.p2.y + ny * t * outward)
+        elsif w.ref == :outer_face
+          outward = (w.interior_side == :left) ? -1.0 : 1.0
+          a1 = Vec2.new(w.p1.x - nx * t * outward, w.p1.y - ny * t * outward)
+          b1 = Vec2.new(w.p2.x - nx * t * outward, w.p2.y - ny * t * outward)
           a2 = Vec2.new(w.p1.x, w.p1.y)
           b2 = Vec2.new(w.p2.x, w.p2.y)
-        else # :center or default
-          half = t / 2.0
-          a1 = Vec2.new(w.p1.x - nx * half, w.p1.y - ny * half)
-          b1 = Vec2.new(w.p2.x - nx * half, w.p2.y - ny * half)
-          a2 = Vec2.new(w.p1.x + nx * half, w.p1.y + ny * half)
-          b2 = Vec2.new(w.p2.x + nx * half, w.p2.y + ny * half)
+        else
+          case w.justify
+          when :left
+            a1 = Vec2.new(w.p1.x, w.p1.y)
+            b1 = Vec2.new(w.p2.x, w.p2.y)
+            a2 = Vec2.new(w.p1.x + nx * t, w.p1.y + ny * t)
+            b2 = Vec2.new(w.p2.x + nx * t, w.p2.y + ny * t)
+          when :right
+            a1 = Vec2.new(w.p1.x - nx * t, w.p1.y - ny * t)
+            b1 = Vec2.new(w.p2.x - nx * t, w.p2.y - ny * t)
+            a2 = Vec2.new(w.p1.x, w.p1.y)
+            b2 = Vec2.new(w.p2.x, w.p2.y)
+          else # :center
+            half = t / 2.0
+            a1 = Vec2.new(w.p1.x - nx * half, w.p1.y - ny * half)
+            b1 = Vec2.new(w.p2.x - nx * half, w.p2.y - ny * half)
+            a2 = Vec2.new(w.p1.x + nx * half, w.p1.y + ny * half)
+            b2 = Vec2.new(w.p2.x + nx * half, w.p2.y + ny * half)
+          end
         end
         [a1, b1, b2, a2]
       end
@@ -139,14 +153,28 @@ module Floorplan
         at = o.at.to_f
         width = o.width.to_f
         t = w.thickness.to_f
-        case w.justify
-        when :left
-          lo = 0.0; hi = t
-        when :right
-          lo = -t; hi = 0.0
+        if w.ref == :inner_face
+          outward_sign = (w.interior_side == :left) ? -1.0 : 1.0
+          inner_off = 0.0
+          outer_off = t * outward_sign
+        elsif w.ref == :outer_face
+          outward_sign = (w.interior_side == :left) ? -1.0 : 1.0
+          inner_off = -t * outward_sign
+          outer_off = 0.0
         else
-          lo = -t / 2.0; hi = t / 2.0
+          case w.justify
+          when :left
+            inner_off = 0.0
+            outer_off = t
+          when :right
+            inner_off = -t
+            outer_off = 0.0
+          else # center
+            inner_off = -t / 2.0
+            outer_off = t / 2.0
+          end
         end
+        lo, hi = [inner_off, outer_off].minmax
         p_a = Vec2.new(w.p1.x + ux * at + nx * lo, w.p1.y + uy * at + ny * lo)
         p_b = Vec2.new(w.p1.x + ux * (at + width) + nx * lo, w.p1.y + uy * (at + width) + ny * lo)
         p_c = Vec2.new(w.p1.x + ux * (at + width) + nx * hi, w.p1.y + uy * (at + width) + ny * hi)

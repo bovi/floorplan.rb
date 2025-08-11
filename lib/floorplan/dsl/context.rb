@@ -10,7 +10,8 @@ module Floorplan
         @plan = Floorplan::Plan.new
         @cursor = nil
         @path_start = nil
-        @walls_defaults = { thickness: 100.mm, justify: :center, layer: :walls }
+        @walls_defaults = { thickness: 100.mm, justify: :center, layer: :walls, ref: :centerline }
+        @path_interior_side = :left
       end
 
       # Global settings
@@ -35,10 +36,16 @@ module Floorplan
       end
 
       # Defaults for walls created afterwards
-      def walls(thickness: nil, justify: nil, layer: nil)
+      def walls(thickness: nil, justify: nil, layer: nil, ref: nil)
         @walls_defaults[:thickness] = thickness if thickness
         @walls_defaults[:justify] = justify.to_sym if justify
         @walls_defaults[:layer] = layer.to_sym if layer
+        @walls_defaults[:ref] = ref.to_sym if ref
+      end
+
+      # Set which side of the drawing path is the interior of the room (:left or :right)
+      def interior(side)
+        @path_interior_side = side.to_sym
       end
 
       # Drawing cursor controls
@@ -47,14 +54,14 @@ module Floorplan
         @path_start = @cursor
       end
 
-      def line(from:, to:, id: nil, thickness: nil, justify: nil, layer: nil)
+      def line(from:, to:, id: nil, thickness: nil, justify: nil, layer: nil, ref: nil, interior: nil)
         p1 = vec(from)
         p2 = vec(to)
-        add_wall(p1, p2, id: id, thickness: thickness, justify: justify, layer: layer)
+        add_wall(p1, p2, id: id, thickness: thickness, justify: justify, layer: layer, ref: ref, interior: interior)
         @cursor = p2
       end
 
-      def go(direction, length, id: nil, thickness: nil, justify: nil, layer: nil)
+      def go(direction, length, id: nil, thickness: nil, justify: nil, layer: nil, ref: nil)
         raise 'start point not set (call start at: [x,y])' unless @cursor
         len = to_mm(length)
         dir = direction.is_a?(Symbol) ? direction : direction.to_sym
@@ -70,21 +77,21 @@ module Floorplan
                  end
         p1 = @cursor
         p2 = Vec2.new(p1.x + dx, p1.y + dy)
-        add_wall(p1, p2, id: id, thickness: thickness, justify: justify, layer: layer)
+        add_wall(p1, p2, id: id, thickness: thickness, justify: justify, layer: layer, ref: ref)
         @cursor = p2
       end
 
-      def close_path(id: nil, thickness: nil, justify: nil, layer: nil)
+      def close_path(id: nil, thickness: nil, justify: nil, layer: nil, ref: nil)
         raise 'no path to close (call start ... then go ...)' unless @cursor && @path_start
         if distance(@cursor, @path_start) > 1e-6
-          add_wall(@cursor, @path_start, id: id, thickness: thickness, justify: justify, layer: layer)
+          add_wall(@cursor, @path_start, id: id, thickness: thickness, justify: justify, layer: layer, ref: ref)
         end
         @cursor = @path_start
         @path_start = nil
       end
 
       # Entities
-      def opening(wall:, at:, type:, width:, swing: nil, sill: nil, head: nil, id: nil)
+      def opening(wall:, at:, type:, width:, swing: nil, sill: nil, head: nil, id: nil, ref: :centerline)
         @plan.openings << Floorplan::Opening.new(
           id: id,
           wall_id: wall,
@@ -93,7 +100,8 @@ module Floorplan
           type: type,
           swing: swing,
           sill: sill && to_mm(sill),
-          head: head && to_mm(head)
+          head: head && to_mm(head),
+          ref: ref
         )
       end
 
@@ -118,13 +126,15 @@ module Floorplan
 
       private
 
-      def add_wall(p1, p2, id:, thickness:, justify:, layer:)
+      def add_wall(p1, p2, id:, thickness:, justify:, layer:, ref: nil, interior: nil)
         opts = @walls_defaults.dup
         opts[:thickness] = to_mm(thickness) if thickness
         opts[:justify] = justify.to_sym if justify
         opts[:layer] = layer.to_sym if layer
+        opts[:ref] = ref.to_sym if ref
         @plan.ensure_layer(opts[:layer])
-        @plan.walls << Floorplan::Wall.new(id: id, p1: p1, p2: p2, thickness: opts[:thickness], justify: opts[:justify], layer: opts[:layer])
+        interior_side = (interior || @path_interior_side)&.to_sym
+        @plan.walls << Floorplan::Wall.new(id: id, p1: p1, p2: p2, thickness: opts[:thickness], justify: opts[:justify], layer: opts[:layer], ref: opts[:ref], interior_side: interior_side)
       end
 
       def distance(a, b)

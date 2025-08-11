@@ -18,27 +18,29 @@ module Floorplan
     def to_h = { name: @name, visible: @visible, style: @style }
   end
 
-    class Wall
-    attr_accessor :id, :p1, :p2, :thickness, :justify, :layer
-    def initialize(id:, p1:, p2:, thickness:, justify: :center, layer: :walls)
+  class Wall
+    attr_accessor :id, :p1, :p2, :thickness, :justify, :layer, :ref, :interior_side
+    def initialize(id:, p1:, p2:, thickness:, justify: :center, layer: :walls, ref: :centerline, interior_side: :left)
       @id = id&.to_sym
       @p1 = p1
       @p2 = p2
       @thickness = thickness
       @justify = justify
       @layer = layer.to_sym
+      @ref = ref.to_sym
+      @interior_side = interior_side&.to_sym
     end
     def length
       Math.hypot(p2.x - p1.x, p2.y - p1.y)
     end
     def to_h
-      { type: :wall, id: @id, p1: p1.to_a, p2: p2.to_a, thickness: @thickness, justify: @justify, layer: @layer }
+      { type: :wall, id: @id, p1: p1.to_a, p2: p2.to_a, thickness: @thickness, justify: @justify, layer: @layer, ref: @ref, interior_side: @interior_side }
     end
   end
 
   class Opening
-    attr_accessor :id, :wall_id, :at, :width, :type, :swing, :sill, :head
-    def initialize(id:, wall_id:, at:, width:, type:, swing: nil, sill: nil, head: nil)
+    attr_accessor :id, :wall_id, :at, :width, :type, :swing, :sill, :head, :ref
+    def initialize(id:, wall_id:, at:, width:, type:, swing: nil, sill: nil, head: nil, ref: :centerline)
       @id = id&.to_sym
       @wall_id = wall_id&.to_sym
       @at = at
@@ -47,9 +49,10 @@ module Floorplan
       @swing = swing&.to_sym
       @sill = sill
       @head = head
+      @ref = ref.to_sym
     end
     def to_h
-      { type: :opening, id: @id, wall_id: @wall_id, at: @at, width: @width, subtype: @type, swing: @swing, sill: @sill, head: @head }
+      { type: :opening, id: @id, wall_id: @wall_id, at: @at, width: @width, subtype: @type, swing: @swing, sill: @sill, head: @head, ref: @ref }
     end
   end
 
